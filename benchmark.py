@@ -8,6 +8,7 @@ from mp_benchmark import MultiprocessingBenchmark
 from zmq_shm_benchmark import ZeroMQSharedMemoryBenchmark
 from shm_ringbuffer_benchmark import SharedMemoryRingBufferBenchmark
 from simple_shm_benchmark import SimpleSharedMemoryBenchmark
+from redis_benchmark import RedisBenchmark
 
 
 @dataclass
@@ -20,6 +21,7 @@ class BenchmarkResults:
     zmq_shm_results: Optional[Dict[str, Any]] = None
     shm_ring_results: Optional[Dict[str, Any]] = None
     simple_shm_results: Optional[Dict[str, Any]] = None
+    redis_results: Optional[Dict[str, Any]] = None
 
     def print_comparison(self):
         """Print a formatted comparison of the benchmark results."""
@@ -52,6 +54,13 @@ class BenchmarkResults:
             simple_shm_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.simple_shm_results['total_time'] * 1024 * 1024)
             print(f"{'Simple Shared Memory':<30} {self.simple_shm_results['total_time']:<15.4f} {self.simple_shm_results['arrays_per_second']:<12.0f} {simple_shm_throughput_mb:<10.2f}")
 
+        if self.redis_results:
+            if self.redis_results.get("error"):
+                print(f"{'Redis Pub/Sub':<30} {'ERROR: ' + self.redis_results['error']:<50}")
+            else:
+                redis_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.redis_results['total_time'] * 1024 * 1024)
+                print(f"{'Redis Pub/Sub':<30} {self.redis_results['total_time']:<15.4f} {self.redis_results['arrays_per_second']:<12.0f} {redis_throughput_mb:<10.2f}")
+
         print(f"{'Multiprocessing':<30} {self.mp_results['total_time']:<15.4f} {self.mp_results['arrays_per_second']:<12.0f} {mp_throughput_mb:<10.2f}")
         print()
 
@@ -69,6 +78,9 @@ class BenchmarkResults:
 
         if self.simple_shm_results:
             methods.append(("Simple Shared Memory", self.simple_shm_results['total_time']))
+        
+        if self.redis_results and not self.redis_results.get("error"):
+            methods.append(("Redis Pub/Sub", self.redis_results['total_time']))
 
         methods.sort(key=lambda x: x[1])
         fastest = methods[0]
@@ -80,7 +92,7 @@ class BenchmarkResults:
         print(f"{'='*70}")
 
 
-def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1, include_ring_buffer: bool = False) -> BenchmarkResults:
+def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1, include_ring_buffer: bool = False, include_redis: bool = False) -> BenchmarkResults:
     """
     Run all benchmarks comparing all available methods.
 
@@ -111,6 +123,10 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
             array_size=array_size,
             buffer_capacity=buffer_capacity
         )
+    
+    redis_bench = None
+    if include_redis:
+        redis_bench = RedisBenchmark(array_size=array_size)
 
     # Warmup runs
     if warmup_runs > 0:
@@ -124,6 +140,8 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
             mp_bench.run_benchmark(warmup_size)
             if shm_ring_bench:
                 shm_ring_bench.run_benchmark(warmup_size)
+            if redis_bench:
+                redis_bench.run_benchmark(warmup_size)
             time.sleep(0.1)
         print("Warmup complete\n")
 
@@ -153,6 +171,13 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
     print("Running multiprocessing benchmark...")
     mp_results = mp_bench.run_benchmark(n_arrays)
 
+    # Run Redis benchmark
+    redis_results = None
+    if redis_bench:
+        print("Running Redis benchmark...")
+        redis_results = redis_bench.run_benchmark(n_arrays)
+        time.sleep(0.5)
+
     # Create and return results
     results = BenchmarkResults(
         zmq_results=zmq_results,
@@ -161,7 +186,8 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
         array_size=array_size,
         zmq_shm_results=zmq_shm_results,
         shm_ring_results=shm_ring_results,
-        simple_shm_results=simple_shm_results
+        simple_shm_results=simple_shm_results,
+        redis_results=redis_results
     )
 
     results.print_comparison()

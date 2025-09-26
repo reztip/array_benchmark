@@ -11,6 +11,7 @@ This project benchmarks and compares the performance of several methods for pass
 *   **ZeroMQ + Shared Memory:** Using ZeroMQ to pass metadata for arrays stored in shared memory.
 *   **Simple Shared Memory:** A basic implementation using `multiprocessing.shared_memory`.
 *   **Shared Memory Ring Buffer:** A more complex implementation using a ring buffer in shared memory.
+*   **Redis Pub/Sub:** Using Redis Pub/Sub to send arrays as bytes.
 
 ## Installation
 
@@ -51,9 +52,26 @@ To run all available benchmarks, including shared memory implementations:
 python cli.py --all -n 1000 -s 1024
 ```
 
+### Redis Benchmark
+
+To include the Redis Pub/Sub benchmark, you first need a running Redis server.
+You can start one easily with Docker:
+
+```bash
+# Make sure to use host networking for the benchmark
+docker run -d --name redis-host --network host redis:latest
+```
+
+Then, run the benchmark with the `--redis` flag:
+
+```bash
+python cli.py --all --redis -n 1000 -s 1024
+```
+
 ### Options
 
 *   `-n`, `--arrays`: The number of arrays to send in the benchmark (default: 1000).
 *   `-s`, `--size`: The size of each array in elements (default: 1024).
 *   `-w`, `--warmup`: The number of warmup runs before the benchmark (default: 1).
 *   `--all`: Run all available benchmarks.
+*   `--redis`: Include the Redis Pub/Sub benchmark (only works with `--all`).
