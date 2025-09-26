@@ -3,11 +3,11 @@
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from .zmq_benchmark import ZeroMQBenchmark
-from .mp_benchmark import MultiprocessingBenchmark
-from .zmq_shm_benchmark import ZeroMQSharedMemoryBenchmark
-from .shm_ringbuffer_benchmark import SharedMemoryRingBufferBenchmark
-from .simple_shm_benchmark import SimpleSharedMemoryBenchmark
+from zmq_benchmark import ZeroMQBenchmark
+from mp_benchmark import MultiprocessingBenchmark
+from zmq_shm_benchmark import ZeroMQSharedMemoryBenchmark
+from shm_ringbuffer_benchmark import SharedMemoryRingBufferBenchmark
+from simple_shm_benchmark import SimpleSharedMemoryBenchmark
 
 
 @dataclass

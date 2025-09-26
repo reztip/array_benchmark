@@ -1,7 +1,7 @@
 """Command-line interface for the array queue benchmark."""
 
 import argparse
-from .benchmark import run_benchmark, run_all_benchmarks
+from benchmark import run_benchmark, run_all_benchmarks
 
 
 def main():
