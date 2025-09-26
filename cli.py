@@ -37,13 +37,20 @@ def main():
         help="Run all benchmarks including ZeroMQ + Shared Memory"
     )
 
+    parser.add_argument(
+        "--redis",
+        action="store_true",
+        help="Include Redis Pub/Sub benchmark in 'all' benchmarks"
+    )
+
     args = parser.parse_args()
 
     if args.all:
         run_all_benchmarks(
             n_arrays=args.arrays,
             array_size=args.size,
-            warmup_runs=args.warmup
+            warmup_runs=args.warmup,
+            include_redis=args.redis
         )
     else:
         run_benchmark(
