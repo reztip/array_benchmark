@@ -5,7 +5,7 @@ from .benchmark import run_benchmark, run_all_benchmarks
 
 
 def main():
-    """Main CLI entry point."""
+    """Main CLI entry point for benchmarking."""
     parser = argparse.ArgumentParser(
         description="Benchmark ZeroMQ vs multiprocessing queues for NumPy array transmission"
     )
