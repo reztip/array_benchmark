@@ -12,7 +12,7 @@ class SharedMemoryRingBufferBenchmark:
     def __init__(self, array_size=1024, buffer_capacity=1024):
         self.array_size = array_size
         self.buffer_capacity = buffer_capacity  # Number of arrays the ring buffer can hold
-        self.element_size = 8  # float64
+        self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
 
         # Ring buffer metadata size (producer_idx, consumer_idx, flags)
@@ -34,7 +34,7 @@ class SharedMemoryRingBufferBenchmark:
             data_start = self.metadata_size
             data_size = self.buffer_capacity * self.array_bytes
             data_view = shm.buf[data_start:data_start + data_size]
-            data_array = np.frombuffer(data_view, dtype=np.float64).reshape(
+            data_array = np.frombuffer(data_view, dtype=np.float32).reshape(
                 self.buffer_capacity, self.array_size
             )
 
@@ -42,7 +42,7 @@ class SharedMemoryRingBufferBenchmark:
 
             for i in range(n_arrays):
                 # Generate array data
-                array = np.random.random(self.array_size).astype(np.float64)
+                array = np.random.random(self.array_size).astype(np.float32)
 
                 # Wait for space in ring buffer
                 while True:
@@ -87,7 +87,7 @@ class SharedMemoryRingBufferBenchmark:
             data_start = self.metadata_size
             data_size = self.buffer_capacity * self.array_bytes
             data_view = shm.buf[data_start:data_start + data_size]
-            data_array = np.frombuffer(data_view, dtype=np.float64).reshape(
+            data_array = np.frombuffer(data_view, dtype=np.float32).reshape(
                 self.buffer_capacity, self.array_size
             )
 

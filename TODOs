@@ -1,0 +1,2 @@
+- Implement a batching mode for testing, with default batch size of 1.
+- Implement variable size batches.

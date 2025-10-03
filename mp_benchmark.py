@@ -14,7 +14,7 @@ class MultiprocessingBenchmark:
         start_time = time.time()
 
         for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float64)
+            array = np.random.random(self.array_size).astype(np.float32)
             queue.put(array)
 
         # Send termination signal

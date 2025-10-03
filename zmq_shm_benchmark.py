@@ -14,7 +14,7 @@ class ZeroMQSharedMemoryBenchmark:
     def __init__(self, array_size=1024, port=5556):
         self.array_size = array_size
         self.port = port
-        self.element_size = 8  # float64
+        self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
 
     def create_shared_memory_file(self, n_arrays):
@@ -46,7 +46,7 @@ class ZeroMQSharedMemoryBenchmark:
 
                 for i in range(n_arrays):
                     # Generate array
-                    array = np.random.random(self.array_size).astype(np.float64)
+                    array = np.random.random(self.array_size).astype(np.float32)
 
                     # Write to shared memory at offset
                     offset = i * self.array_bytes
@@ -88,7 +88,7 @@ class ZeroMQSharedMemoryBenchmark:
                     # Read array from shared memory
                     offset = array_index * self.array_bytes
                     array_bytes = mm[offset:offset + self.array_bytes]
-                    array = np.frombuffer(array_bytes, dtype=np.float64)
+                    array = np.frombuffer(array_bytes, dtype=np.float32)
 
                     received_count += 1
 
