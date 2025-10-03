@@ -2,4 +2,4 @@ numpy==2.3.3
 pyzmq==27.1.0
 redis==6.4.0
 zmq==0.0.0
-pyarrow
+pyarrow==21.0.0

@@ -14,6 +14,13 @@ class PyArrowBenchmark:
         self.array_size = array_size
         self.port = port
         self.ipc_endpoint = f"ipc://{tempfile.gettempdir()}/pyarrow_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
+        # Create schema once to avoid overhead in the loop
+        self.schema = pa.schema([
+            pa.field('array_bytes', pa.binary())
+        ]).with_metadata({
+            'dtype': 'float64',
+            'shape': ','.join(map(str, (self.array_size,)))
+        })
 
     def producer(self, n_arrays, results_queue, ipc_endpoint):
         """Producer process that sends NumPy arrays via PyArrow over ZeroMQ IPC."""
@@ -28,22 +35,15 @@ class PyArrowBenchmark:
         for i in range(n_arrays):
             array_val = np.random.random(self.array_size).astype(np.float64)
             
-            schema = pa.schema([
-                pa.field('array_bytes', pa.binary())
-            ]).with_metadata({
-                'count': str(i),
-                'timestamp': str(time.time()),
-                'dtype': str(array_val.dtype),
-                'shape': ','.join(map(str, array_val.shape))
-            })
-
+            # Create a RecordBatch
             batch = pa.RecordBatch.from_pydict(
                 {'array_bytes': [array_val.tobytes()]},
-                schema=schema
+                schema=self.schema
             )
 
+            # Serialize the RecordBatch to a buffer using the IPC stream format
             sink = pa.BufferOutputStream()
-            with pa.ipc.new_stream(sink, batch.schema) as writer:
+            with pa.ipc.new_stream(sink, self.schema) as writer:
                 writer.write_batch(batch)
             buffer = sink.getvalue()
 
@@ -65,6 +65,9 @@ class PyArrowBenchmark:
 
         start_time = time.time()
         received_count = 0
+        
+        numpy_dtype = None
+        shape = None
 
         while received_count < n_arrays:
             buffer = socket.recv()
@@ -74,12 +77,15 @@ class PyArrowBenchmark:
             with pa.ipc.open_stream(buffer) as reader:
                 batch = reader.read_next_batch()
 
-            meta = {k.decode(): v.decode() for k, v in batch.schema.metadata.items()}
-            dtype = meta['dtype']
-            shape = tuple(map(int, meta['shape'].split(',')))
+            if received_count == 0:
+                # Extract metadata from the schema on the first message
+                meta = {k.decode(): v.decode() for k, v in batch.schema.metadata.items()}
+                numpy_dtype = np.dtype(meta['dtype'])
+                shape = tuple(map(int, meta['shape'].split(',')))
 
+            # Extract and reconstruct the NumPy array
             arr_bytes = batch.to_pydict()['array_bytes'][0]
-            array = np.frombuffer(arr_bytes, dtype=np.dtype(dtype)).reshape(shape)
+            array = np.frombuffer(arr_bytes, dtype=numpy_dtype).reshape(shape)
             
             received_count += 1
 
