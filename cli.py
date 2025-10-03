@@ -43,6 +43,12 @@ def main():
         help="Include Redis Pub/Sub benchmark in 'all' benchmarks"
     )
 
+    parser.add_argument(
+        "--pyarrow",
+        action="store_true",
+        help="Include PyArrow benchmark in 'all' benchmarks"
+    )
+
     args = parser.parse_args()
 
     if args.all:
@@ -50,7 +56,8 @@ def main():
             n_arrays=args.arrays,
             array_size=args.size,
             warmup_runs=args.warmup,
-            include_redis=args.redis
+            include_redis=args.redis,
+            include_pyarrow=args.pyarrow
         )
     else:
         run_benchmark(
