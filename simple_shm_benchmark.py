@@ -12,7 +12,7 @@ import struct
 class SimpleSharedMemoryBenchmark:
     def __init__(self, array_size=1024):
         self.array_size = array_size
-        self.element_size = 8  # float64
+        self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
 
     def producer(self, n_arrays, results_queue, shm_path, ready_event, done_event):
@@ -27,7 +27,7 @@ class SimpleSharedMemoryBenchmark:
 
                 for i in range(n_arrays):
                     # Generate array
-                    array = np.random.random(self.array_size).astype(np.float64)
+                    array = np.random.random(self.array_size).astype(np.float32)
 
                     # Write array to shared memory at position i
                     offset = i * self.array_bytes
@@ -53,7 +53,7 @@ class SimpleSharedMemoryBenchmark:
                 for i in range(n_arrays):
                     offset = i * self.array_bytes
                     array_bytes = mm[offset:offset + self.array_bytes]
-                    array = np.frombuffer(array_bytes, dtype=np.float64)
+                    array = np.frombuffer(array_bytes, dtype=np.float32)
 
                 # Wait for producer to finish (ensures we measure total pipeline time)
                 done_event.wait()

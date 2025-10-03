@@ -32,39 +32,39 @@ class BenchmarkResults:
         print(f"{'='*60}")
         print(f"Arrays sent: {self.n_arrays}")
         print(f"Array size: {self.array_size} elements")
-        print(f"Data per array: {self.array_size * 8} bytes (float64)")
-        print(f"Total data: {self.n_arrays * self.array_size * 8 / (1024*1024):.2f} MB")
+        print(f"Data per array: {self.array_size * 4} bytes (float32)")
+        print(f"Total data: {self.n_arrays * self.array_size * 4 / (1024*1024):.2f} MB")
         print()
 
         print(f"{'Method':<30} {'Total Time (s)':<15} {'Arrays/sec':<12} {'MB/s':<10}")
         print(f"{'-'*70}")
 
-        zmq_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.zmq_results['total_time'] * 1024 * 1024)
-        mp_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.mp_results['total_time'] * 1024 * 1024)
+        zmq_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.zmq_results['total_time'] * 1024 * 1024)
+        mp_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.mp_results['total_time'] * 1024 * 1024)
 
         print(f"{'ZeroMQ':<30} {self.zmq_results['total_time']:<15.4f} {self.zmq_results['arrays_per_second']:<12.0f} {zmq_throughput_mb:<10.2f}")
 
         if self.zmq_shm_results:
-            zmq_shm_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.zmq_shm_results['total_time'] * 1024 * 1024)
+            zmq_shm_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.zmq_shm_results['total_time'] * 1024 * 1024)
             print(f"{'ZeroMQ + Shared Memory':<30} {self.zmq_shm_results['total_time']:<15.4f} {self.zmq_shm_results['arrays_per_second']:<12.0f} {zmq_shm_throughput_mb:<10.2f}")
 
         if self.shm_ring_results:
-            shm_ring_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.shm_ring_results['total_time'] * 1024 * 1024)
+            shm_ring_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.shm_ring_results['total_time'] * 1024 * 1024)
             print(f"{'Shared Memory Ring Buffer':<30} {self.shm_ring_results['total_time']:<15.4f} {self.shm_ring_results['arrays_per_second']:<12.0f} {shm_ring_throughput_mb:<10.2f}")
 
         if self.simple_shm_results:
-            simple_shm_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.simple_shm_results['total_time'] * 1024 * 1024)
+            simple_shm_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.simple_shm_results['total_time'] * 1024 * 1024)
             print(f"{'Simple Shared Memory':<30} {self.simple_shm_results['total_time']:<15.4f} {self.simple_shm_results['arrays_per_second']:<12.0f} {simple_shm_throughput_mb:<10.2f}")
 
         if self.redis_results:
             if self.redis_results.get("error"):
                 print(f"{'Redis Pub/Sub':<30} {'ERROR: ' + self.redis_results['error']:<50}")
             else:
-                redis_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.redis_results['total_time'] * 1024 * 1024)
+                redis_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.redis_results['total_time'] * 1024 * 1024)
                 print(f"{'Redis Pub/Sub':<30} {self.redis_results['total_time']:<15.4f} {self.redis_results['arrays_per_second']:<12.0f} {redis_throughput_mb:<10.2f}")
         
         if self.pyarrow_results:
-            pyarrow_throughput_mb = (self.n_arrays * self.array_size * 8) / (self.pyarrow_results['total_time'] * 1024 * 1024)
+            pyarrow_throughput_mb = (self.n_arrays * self.array_size * 4) / (self.pyarrow_results['total_time'] * 1024 * 1024)
             print(f"{'PyArrow':<30} {self.pyarrow_results['total_time']:<15.4f} {self.pyarrow_results['arrays_per_second']:<12.0f} {pyarrow_throughput_mb:<10.2f}")
 
         print(f"{'Multiprocessing':<30} {self.mp_results['total_time']:<15.4f} {self.mp_results['arrays_per_second']:<12.0f} {mp_throughput_mb:<10.2f}")

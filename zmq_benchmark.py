@@ -27,7 +27,7 @@ class ZeroMQBenchmark:
         start_time = time.time()
 
         for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float64)
+            array = np.random.random(self.array_size).astype(np.float32)
             socket.send(array.tobytes())
 
         # Send termination signal
@@ -54,7 +54,7 @@ class ZeroMQBenchmark:
                 break
 
             # Deserialize array
-            array = np.frombuffer(data, dtype=np.float64)
+            array = np.frombuffer(data, dtype=np.float32)
             received_count += 1
 
         end_time = time.time()

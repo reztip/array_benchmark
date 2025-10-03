@@ -26,7 +26,7 @@ class RedisBenchmark:
         start_time = time.time()
 
         for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float64)
+            array = np.random.random(self.array_size).astype(np.float32)
             r.publish(self.channel, array.tobytes())
 
         # Send termination signal
@@ -57,7 +57,7 @@ class RedisBenchmark:
                     break
                 
                 # Deserialize array
-                array = np.frombuffer(message['data'], dtype=np.float64)
+                array = np.frombuffer(message['data'], dtype=np.float32)
                 received_count += 1
                 if received_count >= n_arrays:
                     break

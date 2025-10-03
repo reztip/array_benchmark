@@ -18,7 +18,7 @@ class PyArrowBenchmark:
         self.schema = pa.schema([
             pa.field('array_bytes', pa.binary())
         ]).with_metadata({
-            'dtype': 'float64',
+            'dtype': 'float32',
             'shape': ','.join(map(str, (self.array_size,)))
         })
 
@@ -33,7 +33,7 @@ class PyArrowBenchmark:
         start_time = time.time()
 
         for i in range(n_arrays):
-            array_val = np.random.random(self.array_size).astype(np.float64)
+            array_val = np.random.random(self.array_size).astype(np.float32)
             
             # Create a RecordBatch
             batch = pa.RecordBatch.from_pydict(
