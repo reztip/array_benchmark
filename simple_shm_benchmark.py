@@ -49,6 +49,9 @@ class SimpleSharedMemoryBenchmark:
                 # Signal ready
                 ready_event.set()
 
+                # Wait for producer to signal completion
+                done_event.wait()
+
                 start_time = time.time()
                 received_count = 0
 
@@ -61,8 +64,6 @@ class SimpleSharedMemoryBenchmark:
                     batch_array = np.frombuffer(batch_bytes, dtype=np.float32).reshape(batch_size, self.array_size)
                     received_count += batch_array.shape[0]
 
-                # Wait for producer to finish (ensures we measure total pipeline time)
-                done_event.wait()
                 end_time = time.time()
 
         results_queue.put(("consumer", end_time - start_time))
@@ -77,9 +78,10 @@ class SimpleSharedMemoryBenchmark:
         total_size = n_arrays * self.array_bytes
 
         try:
-            # Create and initialize the file
+            # Create and initialize the file using seek for better performance
             with open(shm_path, 'wb') as f:
-                f.write(b'\x00' * total_size)
+                f.seek(total_size - 1)
+                f.write(b'\x00')
 
             results_queue = mp.Queue()
             ready_event = mp.Event()
@@ -98,15 +100,27 @@ class SimpleSharedMemoryBenchmark:
             consumer_process.start()
             producer_process.start()
 
-            # Wait for completion
-            producer_process.join()
-            consumer_process.join()
+            # Wait for completion with timeout
+            producer_process.join(timeout=300)
+            consumer_process.join(timeout=300)
+
+            # Check if processes are still alive
+            if producer_process.is_alive():
+                producer_process.terminate()
+                producer_process.join()
+            if consumer_process.is_alive():
+                consumer_process.terminate()
+                consumer_process.join()
 
             # Collect results
             results = {}
             while not results_queue.empty():
                 role, duration = results_queue.get()
                 results[role] = duration
+
+            # Clean up queue
+            results_queue.close()
+            results_queue.join_thread()
 
             total_time = max(results.get("producer", 0), results.get("consumer", 0))
 

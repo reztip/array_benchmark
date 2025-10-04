@@ -43,8 +43,8 @@ class MultiprocessingBenchmark:
 
     def run_benchmark(self, n_arrays):
         """Run the multiprocessing queue benchmark and return timing results."""
-        # Use a multiprocessing queue for data transfer
-        data_queue = mp.Queue()
+        # Use a multiprocessing queue for data transfer with maxsize to prevent memory issues
+        data_queue = mp.Queue(maxsize=100)
         results_queue = mp.Queue()
 
         # Start consumer first
@@ -61,15 +61,29 @@ class MultiprocessingBenchmark:
         )
         producer_process.start()
 
-        # Wait for both processes to complete
-        producer_process.join()
-        consumer_process.join()
+        # Wait for both processes to complete with timeout
+        producer_process.join(timeout=300)
+        consumer_process.join(timeout=300)
+
+        # Check if processes are still alive
+        if producer_process.is_alive():
+            producer_process.terminate()
+            producer_process.join()
+        if consumer_process.is_alive():
+            consumer_process.terminate()
+            consumer_process.join()
 
         # Collect results
         results = {}
         while not results_queue.empty():
             role, duration = results_queue.get()
             results[role] = duration
+
+        # Clean up queues
+        data_queue.close()
+        data_queue.join_thread()
+        results_queue.close()
+        results_queue.join_thread()
 
         total_time = max(results.get("producer", 0), results.get("consumer", 0))
 

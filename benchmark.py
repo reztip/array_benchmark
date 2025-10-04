@@ -49,7 +49,7 @@ class BenchmarkResults:
         """Print a formatted comparison of the benchmark results."""
         print(f"\n{'=' * 60}")
         print("BENCHMARK RESULTS")
-        print(f"{'{=' * 60}")
+        print(f"{'=' * 60}")
         print(f"Arrays sent: {self.n_arrays}")
         print(f"Array size: {self.array_size} elements")
         print(f"Batch size: {self.batch_size}")
@@ -161,7 +161,6 @@ def run_all_benchmarks(
                     bench.run_benchmark(warmup_size)
                 except Exception as e:
                     print(f"    Error during warmup for {name}: {e}")
-            time.sleep(0.1)
         print("Warmup complete\n")
 
     results = {}
@@ -222,7 +221,6 @@ def run_benchmark(
             print(f"  Warmup {i + 1}/{warmup_runs}")
             for bench in benchmarks_to_run.values():
                 bench.run_benchmark(warmup_size)
-            time.sleep(0.1)
         print("Warmup complete\n")
 
     results = {}

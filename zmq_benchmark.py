@@ -16,22 +16,22 @@ class ZeroMQBenchmark:
         # Create unique IPC endpoint
         self.ipc_endpoint = f"ipc://{tempfile.gettempdir()}/zmq_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
 
-    def producer(self, n_arrays, results_queue, ipc_endpoint):
+    def producer(self, n_arrays, results_queue, ipc_endpoint, ready_event):
         """Producer process that sends NumPy arrays via ZeroMQ IPC."""
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(ipc_endpoint)
 
-        # Small delay to ensure consumer is ready
-        time.sleep(0.1)
+        # Wait for consumer to be ready
+        ready_event.wait()
 
         start_time = time.time()
 
         for i in range(0, n_arrays, self.batch_size):
             batch_size = min(self.batch_size, n_arrays - i)
             numpy_batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
-            batch_bytes = [arr.tobytes() for arr in numpy_batch]
-            socket.send_multipart(batch_bytes)
+            # Send entire batch as single message for better performance
+            socket.send(numpy_batch.tobytes())
 
         # Send termination signal
         socket.send(b"DONE")
@@ -42,24 +42,26 @@ class ZeroMQBenchmark:
 
         results_queue.put(("producer", end_time - start_time))
 
-    def consumer(self, n_arrays, results_queue, ipc_endpoint):
+    def consumer(self, n_arrays, results_queue, ipc_endpoint, ready_event):
         """Consumer process that receives NumPy arrays via ZeroMQ IPC."""
         context = zmq.Context()
         socket = context.socket(zmq.PULL)
         socket.connect(ipc_endpoint)
 
+        # Signal that consumer is ready
+        ready_event.set()
+
         start_time = time.time()
         received_count = 0
 
         while received_count < n_arrays:
-            data = socket.recv_multipart()
-            if data == [b"DONE"]:
+            data = socket.recv()
+            if data == b"DONE":
                 break
 
-            # Deserialize arrays
-            for msg in data:
-                array = np.frombuffer(msg, dtype=np.float32)
-                received_count += 1
+            # Deserialize batch
+            batch = np.frombuffer(data, dtype=np.float32).reshape(-1, self.array_size)
+            received_count += len(batch)
 
         end_time = time.time()
         socket.close()
@@ -70,6 +72,7 @@ class ZeroMQBenchmark:
     def run_benchmark(self, n_arrays):
         """Run the ZeroMQ IPC benchmark and return timing results."""
         results_queue = mp.Queue()
+        ready_event = mp.Event()
 
         # Create unique IPC endpoint for this benchmark run
         ipc_endpoint = f"ipc://{tempfile.gettempdir()}/zmq_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
@@ -78,26 +81,38 @@ class ZeroMQBenchmark:
             # Start consumer first
             consumer_process = mp.Process(
                 target=self.consumer,
-                args=(n_arrays, results_queue, ipc_endpoint)
+                args=(n_arrays, results_queue, ipc_endpoint, ready_event)
             )
             consumer_process.start()
 
             # Start producer
             producer_process = mp.Process(
                 target=self.producer,
-                args=(n_arrays, results_queue, ipc_endpoint)
+                args=(n_arrays, results_queue, ipc_endpoint, ready_event)
             )
             producer_process.start()
 
-            # Wait for both processes to complete
-            producer_process.join()
-            consumer_process.join()
+            # Wait for both processes to complete with timeout
+            producer_process.join(timeout=300)
+            consumer_process.join(timeout=300)
+
+            # Check if processes are still alive
+            if producer_process.is_alive():
+                producer_process.terminate()
+                producer_process.join()
+            if consumer_process.is_alive():
+                consumer_process.terminate()
+                consumer_process.join()
 
             # Collect results
             results = {}
             while not results_queue.empty():
                 role, duration = results_queue.get()
                 results[role] = duration
+
+            # Clean up queue
+            results_queue.close()
+            results_queue.join_thread()
 
             total_time = max(results.get("producer", 0), results.get("consumer", 0))
 
