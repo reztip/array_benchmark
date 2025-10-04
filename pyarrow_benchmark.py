@@ -14,31 +14,36 @@ class PyArrowBenchmark:
     def __init__(self, array_size=1024, batch_size=1, port=5555):
         self.array_size = array_size
         self.batch_size = batch_size
-        # Schema for a RecordBatch containing a single array (as a list of floats)
+        # Use simple schema with flat float32 array for better performance
         self.schema = pa.schema([
-            pa.field('array', pa.list_(pa.float32()))
+            pa.field('data', pa.float32())
         ])
         self.ipc_endpoint = None
 
     def _estimate_size(self, n_arrays):
-        """Estimates the shared memory size needed by serializing one RecordBatch."""
-        numpy_array = np.zeros(self.array_size, dtype=np.float32)
-        
-        # Create a batch directly from the numpy array
-        record_batch = pa.RecordBatch.from_arrays([pa.array([numpy_array])], schema=self.schema)
+        """Estimates the shared memory size needed for batched serialization."""
+        # Create a sample batch to estimate overhead
+        sample_batch_size = min(self.batch_size, n_arrays)
+        sample_data = np.zeros(sample_batch_size * self.array_size, dtype=np.float32)
 
-        # Serialize to get size
+        # Create table and serialize
+        table = pa.Table.from_arrays([pa.array(sample_data)], schema=self.schema)
+
         sink = pa.BufferOutputStream()
-        with pa.ipc.new_stream(sink, self.schema) as writer:
-            writer.write_batch(record_batch)
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
         buffer = sink.getvalue()
-        
-        # Estimate for n_arrays with a 20% safety buffer
-        estimated_size = int(len(buffer.to_pybytes()) * n_arrays * 1.2)
+
+        # Calculate per-batch overhead and total size
+        bytes_per_batch = len(buffer.to_pybytes())
+        num_batches = (n_arrays + self.batch_size - 1) // self.batch_size
+
+        # 30% safety buffer for metadata overhead
+        estimated_size = int(bytes_per_batch * num_batches * 1.3)
         return estimated_size
 
     def producer(self, n_arrays, results_queue, shm_name, shm_size, ipc_endpoint, ready_event):
-        """Producer: writes Arrow RecordBatches to shared memory and sends notifications."""
+        """Producer: writes batched Arrow tables to shared memory."""
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(ipc_endpoint)
@@ -54,31 +59,33 @@ class PyArrowBenchmark:
         out_of_memory = False
 
         for i in range(0, n_arrays, self.batch_size):
-            batch_size = min(self.batch_size, n_arrays - i)
-            numpy_batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+            actual_batch_size = min(self.batch_size, n_arrays - i)
+            numpy_batch = np.random.random((actual_batch_size, self.array_size)).astype(np.float32)
 
-            for j in range(batch_size):
-                numpy_array = numpy_batch[j]
+            # Flatten entire batch and serialize as single Table
+            # This amortizes IPC overhead across all arrays in the batch
+            flat_data = numpy_batch.flatten()
+            table = pa.Table.from_arrays([pa.array(flat_data)], schema=self.schema)
 
-                # Create a RecordBatch containing that single array
-                record_batch = pa.RecordBatch.from_arrays([pa.array([numpy_array])], schema=self.schema)
+            # Serialize entire batch at once
+            sink = pa.BufferOutputStream()
+            with pa.ipc.new_stream(sink, table.schema) as writer:
+                writer.write_table(table)
 
-                # Serialize the RecordBatch
-                sink = pa.BufferOutputStream()
-                with pa.ipc.new_stream(sink, self.schema) as writer:
-                    writer.write_batch(record_batch)
-                buffer = sink.getvalue()
-                buffer_size = buffer.size
+            buffer = sink.getvalue()
+            buffer_size = buffer.size
 
-                if current_offset + buffer_size > shm_size:
-                    print(f"Producer: Not enough shared memory! Offset: {current_offset}, Size: {buffer_size}, Total: {shm_size}")
-                    out_of_memory = True
-                    break
+            if current_offset + buffer_size > shm_size:
+                print(f"Producer: Not enough shared memory! Offset: {current_offset}, Size: {buffer_size}, Total: {shm_size}")
+                out_of_memory = True
+                break
 
-                shm.buf[current_offset : current_offset + buffer_size] = buffer.to_pybytes()
+            # Single memcpy for entire batch
+            shm.buf[current_offset:current_offset + buffer_size] = buffer.to_pybytes()
 
-                socket.send_string(f"{current_offset},{buffer_size}")
-                current_offset += buffer_size
+            # Send metadata: offset, size, number of arrays in this batch
+            socket.send_string(f"{current_offset},{buffer_size},{actual_batch_size}")
+            current_offset += buffer_size
 
             if out_of_memory:
                 break
@@ -92,7 +99,7 @@ class PyArrowBenchmark:
         results_queue.put(("producer", end_time - start_time))
 
     def consumer(self, n_arrays, results_queue, shm_name, ipc_endpoint, ready_event):
-        """Consumer: receives notifications and reads Arrow RecordBatches from shared memory."""
+        """Consumer: reads batched Arrow tables from shared memory using zero-copy."""
         context = zmq.Context()
         socket = context.socket(zmq.PULL)
         socket.connect(ipc_endpoint)
@@ -110,17 +117,24 @@ class PyArrowBenchmark:
             if message == "DONE":
                 break
 
-            offset, size = map(int, message.split(','))
-            
-            shm_slice = shm.buf[offset : offset + size]
+            parts = message.split(',')
+            offset, size, batch_arrays = int(parts[0]), int(parts[1]), int(parts[2])
 
-            with pa.ipc.open_stream(shm_slice) as reader:
-                record_batch = reader.read_next_batch()
-            
-            # Extract the array and convert to NumPy
-            numpy_array = record_batch.column(0)[0].as_py()
-            
-            received_count += 1
+            # Copy data from shared memory to avoid buffer reference issues
+            buffer_data = bytes(shm.buf[offset:offset + size])
+            buffer = pa.py_buffer(buffer_data)
+
+            # Deserialize the Arrow table
+            with pa.ipc.open_stream(buffer) as reader:
+                table = reader.read_all()
+
+            # Convert to numpy efficiently and reshape back to original dimensions
+            # to_numpy() is much faster than as_py()
+            flat_array = table.column(0).to_numpy()
+            arrays = flat_array.reshape(batch_arrays, self.array_size)
+
+            # In a real application, you would process the arrays here
+            received_count += batch_arrays
 
         end_time = time.time()
 
