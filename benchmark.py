@@ -19,6 +19,7 @@ class BenchmarkResults:
     mp_results: Dict[str, Any]
     n_arrays: int
     array_size: int
+    batch_size: int
     zmq_shm_results: Optional[Dict[str, Any]] = None
     shm_ring_results: Optional[Dict[str, Any]] = None
     simple_shm_results: Optional[Dict[str, Any]] = None
@@ -32,6 +33,7 @@ class BenchmarkResults:
         print(f"{'='*60}")
         print(f"Arrays sent: {self.n_arrays}")
         print(f"Array size: {self.array_size} elements")
+        print(f"Batch size: {self.batch_size}")
         print(f"Data per array: {self.array_size * 4} bytes (float32)")
         print(f"Total data: {self.n_arrays * self.array_size * 4 / (1024*1024):.2f} MB")
         print()
@@ -101,7 +103,7 @@ class BenchmarkResults:
         print(f"{'='*70}")
 
 
-def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1, include_ring_buffer: bool = False, include_redis: bool = False, include_pyarrow: bool = False) -> BenchmarkResults:
+def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1, batch_size: int = 1, include_ring_buffer: bool = False, include_redis: bool = False, include_pyarrow: bool = False) -> BenchmarkResults:
     """
     Run all benchmarks comparing all available methods.
 
@@ -109,6 +111,7 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
         n_arrays: Number of arrays to send
         array_size: Size of each array (number of elements)
         warmup_runs: Number of warmup runs before actual benchmark
+        batch_size: Maximum batch size for sending arrays
         include_ring_buffer: Whether to include shared memory ring buffer benchmark
         include_redis: Whether to include Redis Pub/Sub benchmark
         include_pyarrow: Whether to include PyArrow benchmark
@@ -118,13 +121,14 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
     """
     print(f"Running all benchmarks: {n_arrays} arrays of size {array_size}")
     print(f"Warmup runs: {warmup_runs}")
+    print(f"Batch size: {batch_size}")
     print()
 
     # Initialize benchmarks
-    zmq_bench = ZeroMQBenchmark(array_size=array_size)
-    zmq_shm_bench = ZeroMQSharedMemoryBenchmark(array_size=array_size)
-    mp_bench = MultiprocessingBenchmark(array_size=array_size)
-    simple_shm_bench = SimpleSharedMemoryBenchmark(array_size=array_size)
+    zmq_bench = ZeroMQBenchmark(array_size=array_size, batch_size=batch_size)
+    zmq_shm_bench = ZeroMQSharedMemoryBenchmark(array_size=array_size, batch_size=batch_size)
+    mp_bench = MultiprocessingBenchmark(array_size=array_size, batch_size=batch_size)
+    simple_shm_bench = SimpleSharedMemoryBenchmark(array_size=array_size, batch_size=batch_size)
 
     shm_ring_bench = None
     if include_ring_buffer:
@@ -132,16 +136,17 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
         buffer_capacity = min(1024, max(64, n_arrays // 4))
         shm_ring_bench = SharedMemoryRingBufferBenchmark(
             array_size=array_size,
+            batch_size=batch_size,
             buffer_capacity=buffer_capacity
         )
     
     redis_bench = None
     if include_redis:
-        redis_bench = RedisBenchmark(array_size=array_size)
+        redis_bench = RedisBenchmark(array_size=array_size, batch_size=batch_size)
 
     pyarrow_bench = None
     if include_pyarrow:
-        pyarrow_bench = PyArrowBenchmark(array_size=array_size)
+        pyarrow_bench = PyArrowBenchmark(array_size=array_size, batch_size=batch_size)
 
     # Warmup runs
     if warmup_runs > 0:
@@ -208,6 +213,7 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
         mp_results=mp_results,
         n_arrays=n_arrays,
         array_size=array_size,
+        batch_size=batch_size,
         zmq_shm_results=zmq_shm_results,
         shm_ring_results=shm_ring_results,
         simple_shm_results=simple_shm_results,
@@ -219,7 +225,7 @@ def run_all_benchmarks(n_arrays: int = 1000, array_size: int = 1024, warmup_runs
     return results
 
 
-def run_benchmark(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1) -> BenchmarkResults:
+def run_benchmark(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int = 1, batch_size: int = 1) -> BenchmarkResults:
     """
     Run benchmarks comparing ZeroMQ and multiprocessing queues.
 
@@ -227,17 +233,19 @@ def run_benchmark(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int
         n_arrays: Number of arrays to send
         array_size: Size of each array (number of elements)
         warmup_runs: Number of warmup runs before actual benchmark
+        batch_size: Maximum batch size for sending arrays
 
     Returns:
         BenchmarkResults object containing timing and throughput data
     """
     print(f"Running benchmark: {n_arrays} arrays of size {array_size}")
     print(f"Warmup runs: {warmup_runs}")
+    print(f"Batch size: {batch_size}")
     print()
 
     # Initialize benchmarks
-    zmq_bench = ZeroMQBenchmark(array_size=array_size)
-    mp_bench = MultiprocessingBenchmark(array_size=array_size)
+    zmq_bench = ZeroMQBenchmark(array_size=array_size, batch_size=batch_size)
+    mp_bench = MultiprocessingBenchmark(array_size=array_size, batch_size=batch_size)
 
     # Warmup runs
     if warmup_runs > 0:
@@ -265,7 +273,8 @@ def run_benchmark(n_arrays: int = 1000, array_size: int = 1024, warmup_runs: int
         zmq_results=zmq_results,
         mp_results=mp_results,
         n_arrays=n_arrays,
-        array_size=array_size
+        array_size=array_size,
+        batch_size=batch_size
     )
 
     results.print_comparison()

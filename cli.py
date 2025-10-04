@@ -49,6 +49,13 @@ def main():
         help="Include PyArrow benchmark in 'all' benchmarks"
     )
 
+    parser.add_argument(
+        "-b", "--batch-size",
+        type=int,
+        default=1,
+        help="Maximum batch size for sending arrays (default: 1)"
+    )
+
     args = parser.parse_args()
 
     if args.all:
@@ -56,6 +63,7 @@ def main():
             n_arrays=args.arrays,
             array_size=args.size,
             warmup_runs=args.warmup,
+            batch_size=args.batch_size,
             include_redis=args.redis,
             include_pyarrow=args.pyarrow
         )
@@ -63,7 +71,8 @@ def main():
         run_benchmark(
             n_arrays=args.arrays,
             array_size=args.size,
-            warmup_runs=args.warmup
+            warmup_runs=args.warmup,
+            batch_size=args.batch_size
         )
 
 

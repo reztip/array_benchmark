@@ -10,13 +10,14 @@ import pyarrow as pa
 
 
 class PyArrowBenchmark:
-    def __init__(self, array_size=1024, port=5555):
+    def __init__(self, array_size=1024, batch_size=1, port=5555):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.port = port
         self.ipc_endpoint = f"ipc://{tempfile.gettempdir()}/pyarrow_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
         # Create schema once to avoid overhead in the loop
         self.schema = pa.schema([
-            pa.field('array_bytes', pa.binary())
+            pa.field('array_bytes', pa.list_(pa.binary()))
         ]).with_metadata({
             'dtype': 'float32',
             'shape': ','.join(map(str, (self.array_size,)))
@@ -32,12 +33,13 @@ class PyArrowBenchmark:
 
         start_time = time.time()
 
-        for i in range(n_arrays):
-            array_val = np.random.random(self.array_size).astype(np.float32)
+        for i in range(0, n_arrays, self.batch_size):
+            batch_size = min(self.batch_size, n_arrays - i)
+            batch_arrays = [np.random.random(self.array_size).astype(np.float32) for _ in range(batch_size)]
             
             # Create a RecordBatch
             batch = pa.RecordBatch.from_pydict(
-                {'array_bytes': [array_val.tobytes()]},
+                {'array_bytes': [[arr.tobytes() for arr in batch_arrays]]},
                 schema=self.schema
             )
 
@@ -83,11 +85,11 @@ class PyArrowBenchmark:
                 numpy_dtype = np.dtype(meta['dtype'])
                 shape = tuple(map(int, meta['shape'].split(',')))
 
-            # Extract and reconstruct the NumPy array
-            arr_bytes = batch.to_pydict()['array_bytes'][0]
-            array = np.frombuffer(arr_bytes, dtype=numpy_dtype).reshape(shape)
-            
-            received_count += 1
+            # Extract and reconstruct the NumPy arrays
+            arr_bytes_list = batch.to_pydict()['array_bytes'][0]
+            for arr_bytes in arr_bytes_list:
+                array = np.frombuffer(arr_bytes, dtype=numpy_dtype).reshape(shape)
+                received_count += 1
 
         end_time = time.time()
         socket.close()

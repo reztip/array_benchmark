@@ -9,8 +9,9 @@ import threading
 
 
 class SharedMemoryRingBufferBenchmark:
-    def __init__(self, array_size=1024, buffer_capacity=1024):
+    def __init__(self, array_size=1024, batch_size=1, buffer_capacity=1024):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.buffer_capacity = buffer_capacity  # Number of arrays the ring buffer can hold
         self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
@@ -30,39 +31,35 @@ class SharedMemoryRingBufferBenchmark:
             # Map metadata section
             metadata_view = shm.buf[:self.metadata_size]
 
-            # Map ring buffer data section - use exact size calculation
+            # Map ring buffer data section
             data_start = self.metadata_size
             data_size = self.buffer_capacity * self.array_bytes
-            data_view = shm.buf[data_start:data_start + data_size]
             data_array = np.frombuffer(data_view, dtype=np.float32).reshape(
                 self.buffer_capacity, self.array_size
             )
 
             start_time = time.time()
 
-            for i in range(n_arrays):
-                # Generate array data
-                array = np.random.random(self.array_size).astype(np.float32)
+            for i in range(0, n_arrays, self.batch_size):
+                batch_size = min(self.batch_size, n_arrays - i)
+                batch = [np.random.random(self.array_size).astype(np.float32) for _ in range(batch_size)]
 
                 # Wait for space in ring buffer
                 while True:
-                    # Read current indices atomically
                     producer_idx = struct.unpack('Q', metadata_view[:8])[0]
                     consumer_idx = struct.unpack('Q', metadata_view[8:16])[0]
 
-                    # Check if buffer has space
-                    next_producer_idx = (producer_idx + 1) % self.buffer_capacity
-                    if next_producer_idx != consumer_idx:
+                    if (producer_idx + batch_size) % self.buffer_capacity != consumer_idx:
                         break
-
-                    # Busy wait with small delay to avoid excessive CPU usage
                     time.sleep(0.0001)
 
-                # Write array to ring buffer
-                buffer_idx = producer_idx % self.buffer_capacity
-                data_array[buffer_idx] = array
+                # Write batch to ring buffer
+                for j in range(batch_size):
+                    buffer_idx = (producer_idx + j) % self.buffer_capacity
+                    data_array[buffer_idx] = batch[j]
 
-                # Update producer index atomically
+                # Update producer index
+                next_producer_idx = (producer_idx + batch_size) % self.buffer_capacity
                 struct.pack_into('Q', metadata_view, 0, next_producer_idx)
 
             # Set completion flag
@@ -83,10 +80,9 @@ class SharedMemoryRingBufferBenchmark:
             # Map metadata section
             metadata_view = shm.buf[:self.metadata_size]
 
-            # Map ring buffer data section - use exact size calculation
+            # Map ring buffer data section
             data_start = self.metadata_size
             data_size = self.buffer_capacity * self.array_bytes
-            data_view = shm.buf[data_start:data_start + data_size]
             data_array = np.frombuffer(data_view, dtype=np.float32).reshape(
                 self.buffer_capacity, self.array_size
             )
@@ -95,28 +91,22 @@ class SharedMemoryRingBufferBenchmark:
             received_count = 0
 
             while received_count < n_arrays:
-                # Read current indices atomically
                 producer_idx = struct.unpack('Q', metadata_view[:8])[0]
                 consumer_idx = struct.unpack('Q', metadata_view[8:16])[0]
 
-                # Check if data is available
                 if consumer_idx != producer_idx:
-                    # Read array from ring buffer
-                    buffer_idx = consumer_idx % self.buffer_capacity
-                    array = data_array[buffer_idx].copy()  # Copy to avoid race conditions
+                    num_to_read = (producer_idx - consumer_idx + self.buffer_capacity) % self.buffer_capacity
+                    for i in range(num_to_read):
+                        buffer_idx = (consumer_idx + i) % self.buffer_capacity
+                        array = data_array[buffer_idx].copy()
+                        received_count += 1
 
-                    # Update consumer index atomically
-                    next_consumer_idx = (consumer_idx + 1) % self.buffer_capacity
+                    next_consumer_idx = (consumer_idx + num_to_read) % self.buffer_capacity
                     struct.pack_into('Q', metadata_view, 8, next_consumer_idx)
-
-                    received_count += 1
                 else:
-                    # Check if producer is done
                     done_flag = struct.unpack('Q', metadata_view[16:24])[0]
                     if done_flag and consumer_idx == producer_idx:
                         break
-
-                    # Busy wait with small delay
                     time.sleep(0.0001)
 
             end_time = time.time()

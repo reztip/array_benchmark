@@ -11,8 +11,9 @@ from pathlib import Path
 
 
 class ZeroMQSharedMemoryBenchmark:
-    def __init__(self, array_size=1024, port=5556):
+    def __init__(self, array_size=1024, batch_size=1, port=5556):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.port = port
         self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
@@ -44,16 +45,17 @@ class ZeroMQSharedMemoryBenchmark:
             with mmap.mmap(f.fileno(), 0) as mm:
                 start_time = time.time()
 
-                for i in range(n_arrays):
-                    # Generate array
-                    array = np.random.random(self.array_size).astype(np.float32)
+                for i in range(0, n_arrays, self.batch_size):
+                    batch_size = min(self.batch_size, n_arrays - i)
+                    batch = [np.random.random(self.array_size).astype(np.float32) for _ in range(batch_size)]
 
-                    # Write to shared memory at offset
+                    # Write batch to shared memory
                     offset = i * self.array_bytes
-                    mm[offset:offset + self.array_bytes] = array.tobytes()
+                    size = batch_size * self.array_bytes
+                    mm[offset:offset + size] = b''.join(arr.tobytes() for arr in batch)
 
-                    # Send notification with array index via ZeroMQ
-                    socket.send_string(str(i))
+                    # Send notification with batch info
+                    socket.send_string(f"{i},{batch_size}")
 
                 # Send termination signal
                 socket.send_string("DONE")
@@ -82,15 +84,15 @@ class ZeroMQSharedMemoryBenchmark:
                     if message == "DONE":
                         break
 
-                    # Parse array index
-                    array_index = int(message)
+                    # Parse batch info
+                    start_index, batch_size = map(int, message.split(','))
 
-                    # Read array from shared memory
-                    offset = array_index * self.array_bytes
-                    array_bytes = mm[offset:offset + self.array_bytes]
-                    array = np.frombuffer(array_bytes, dtype=np.float32)
-
-                    received_count += 1
+                    # Read batch from shared memory
+                    for i in range(batch_size):
+                        offset = (start_index + i) * self.array_bytes
+                        array_bytes = mm[offset:offset + self.array_bytes]
+                        array = np.frombuffer(array_bytes, dtype=np.float32)
+                        received_count += 1
 
                 end_time = time.time()
 
