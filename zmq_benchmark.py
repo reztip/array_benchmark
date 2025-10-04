@@ -9,8 +9,9 @@ import tempfile
 
 
 class ZeroMQBenchmark:
-    def __init__(self, array_size=1024, port=5555):
+    def __init__(self, array_size=1024, batch_size=1, port=5555):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.port = port
         # Create unique IPC endpoint
         self.ipc_endpoint = f"ipc://{tempfile.gettempdir()}/zmq_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
@@ -26,9 +27,11 @@ class ZeroMQBenchmark:
 
         start_time = time.time()
 
-        for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float32)
-            socket.send(array.tobytes())
+        for i in range(0, n_arrays, self.batch_size):
+            batch_size = min(self.batch_size, n_arrays - i)
+            numpy_batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+            batch_bytes = [arr.tobytes() for arr in numpy_batch]
+            socket.send_multipart(batch_bytes)
 
         # Send termination signal
         socket.send(b"DONE")
@@ -49,13 +52,14 @@ class ZeroMQBenchmark:
         received_count = 0
 
         while received_count < n_arrays:
-            data = socket.recv()
-            if data == b"DONE":
+            data = socket.recv_multipart()
+            if data == [b"DONE"]:
                 break
 
-            # Deserialize array
-            array = np.frombuffer(data, dtype=np.float32)
-            received_count += 1
+            # Deserialize arrays
+            for msg in data:
+                array = np.frombuffer(msg, dtype=np.float32)
+                received_count += 1
 
         end_time = time.time()
         socket.close()

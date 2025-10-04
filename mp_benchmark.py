@@ -6,16 +6,18 @@ import numpy as np
 
 
 class MultiprocessingBenchmark:
-    def __init__(self, array_size=1024):
+    def __init__(self, array_size=1024, batch_size=1):
         self.array_size = array_size
+        self.batch_size = batch_size
 
     def producer(self, n_arrays, queue, results_queue):
         """Producer process that sends NumPy arrays via multiprocessing queue."""
         start_time = time.time()
 
-        for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float32)
-            queue.put(array)
+        for i in range(0, n_arrays, self.batch_size):
+            batch_size = min(self.batch_size, n_arrays - i)
+            batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+            queue.put(batch)
 
         # Send termination signal
         queue.put("DONE")
@@ -33,8 +35,8 @@ class MultiprocessingBenchmark:
             if isinstance(data, str) and data == "DONE":
                 break
 
-            # Data is already a NumPy array (multiprocessing handles serialization)
-            received_count += 1
+            # Data is a batch of NumPy arrays
+            received_count += len(data)
 
         end_time = time.time()
         results_queue.put(("consumer", end_time - start_time))

@@ -10,8 +10,9 @@ import struct
 
 
 class SimpleSharedMemoryBenchmark:
-    def __init__(self, array_size=1024):
+    def __init__(self, array_size=1024, batch_size=1):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.element_size = 4  # float32
         self.array_bytes = array_size * self.element_size
 
@@ -25,13 +26,14 @@ class SimpleSharedMemoryBenchmark:
             with mmap.mmap(f.fileno(), 0) as mm:
                 start_time = time.time()
 
-                for i in range(n_arrays):
-                    # Generate array
-                    array = np.random.random(self.array_size).astype(np.float32)
-
-                    # Write array to shared memory at position i
+                for i in range(0, n_arrays, self.batch_size):
+                    batch_size = min(self.batch_size, n_arrays - i)
+                    batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+                    
+                    # Write batch to shared memory
                     offset = i * self.array_bytes
-                    mm[offset:offset + self.array_bytes] = array.tobytes()
+                    size = batch_size * self.array_bytes
+                    mm[offset:offset + size] = batch.tobytes()
 
                 # Signal completion
                 done_event.set()
@@ -48,12 +50,16 @@ class SimpleSharedMemoryBenchmark:
                 ready_event.set()
 
                 start_time = time.time()
+                received_count = 0
 
-                # Read all arrays
-                for i in range(n_arrays):
+                # Read all arrays in batches
+                for i in range(0, n_arrays, self.batch_size):
+                    batch_size = min(self.batch_size, n_arrays - i)
                     offset = i * self.array_bytes
-                    array_bytes = mm[offset:offset + self.array_bytes]
-                    array = np.frombuffer(array_bytes, dtype=np.float32)
+                    size = batch_size * self.array_bytes
+                    batch_bytes = mm[offset:offset + size]
+                    batch_array = np.frombuffer(batch_bytes, dtype=np.float32).reshape(batch_size, self.array_size)
+                    received_count += batch_array.shape[0]
 
                 # Wait for producer to finish (ensures we measure total pipeline time)
                 done_event.wait()

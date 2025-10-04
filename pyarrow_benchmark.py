@@ -1,4 +1,4 @@
-"""PyArrow benchmark implementation for NumPy array transmission."""
+"""PyArrow benchmark implementation for NumPy array transmission, using RecordBatch."""
 
 import time
 import multiprocessing as mp
@@ -7,110 +7,140 @@ import zmq
 import os
 import tempfile
 import pyarrow as pa
+from multiprocessing import shared_memory
 
 
 class PyArrowBenchmark:
-    def __init__(self, array_size=1024, port=5555):
+    def __init__(self, array_size=1024, batch_size=1, port=5555):
         self.array_size = array_size
-        self.port = port
-        self.ipc_endpoint = f"ipc://{tempfile.gettempdir()}/pyarrow_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
-        # Create schema once to avoid overhead in the loop
+        self.batch_size = batch_size
+        # Schema for a RecordBatch containing a single array (as a list of floats)
         self.schema = pa.schema([
-            pa.field('array_bytes', pa.binary())
-        ]).with_metadata({
-            'dtype': 'float32',
-            'shape': ','.join(map(str, (self.array_size,)))
-        })
+            pa.field('array', pa.list_(pa.float32()))
+        ])
+        self.ipc_endpoint = None
 
-    def producer(self, n_arrays, results_queue, ipc_endpoint):
-        """Producer process that sends NumPy arrays via PyArrow over ZeroMQ IPC."""
+    def _estimate_size(self, n_arrays):
+        """Estimates the shared memory size needed by serializing one RecordBatch."""
+        numpy_array = np.zeros(self.array_size, dtype=np.float32)
+        
+        # Create a batch directly from the numpy array
+        record_batch = pa.RecordBatch.from_arrays([pa.array([numpy_array])], schema=self.schema)
+
+        # Serialize to get size
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, self.schema) as writer:
+            writer.write_batch(record_batch)
+        buffer = sink.getvalue()
+        
+        # Estimate for n_arrays with a 20% safety buffer
+        estimated_size = int(len(buffer.to_pybytes()) * n_arrays * 1.2)
+        return estimated_size
+
+    def producer(self, n_arrays, results_queue, shm_name, shm_size, ipc_endpoint):
+        """Producer: writes Arrow RecordBatches to shared memory and sends notifications."""
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(ipc_endpoint)
 
+        shm = shared_memory.SharedMemory(name=shm_name)
         time.sleep(0.1)
-
         start_time = time.time()
 
-        for i in range(n_arrays):
-            array_val = np.random.random(self.array_size).astype(np.float32)
+        current_offset = 0
+
+        for i in range(0, n_arrays, self.batch_size):
+            batch_size = min(self.batch_size, n_arrays - i)
+            numpy_batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+
+            for j in range(batch_size):
+                numpy_array = numpy_batch[j]
+                
+                # Create a RecordBatch containing that single array
+                record_batch = pa.RecordBatch.from_arrays([pa.array([numpy_array])], schema=self.schema)
+
+                # Serialize the RecordBatch
+                sink = pa.BufferOutputStream()
+                with pa.ipc.new_stream(sink, self.schema) as writer:
+                    writer.write_batch(record_batch)
+                buffer = sink.getvalue()
+                buffer_size = buffer.size
+
+                if current_offset + buffer_size > shm_size:
+                    print(f"Producer: Not enough shared memory! Offset: {current_offset}, Size: {buffer_size}, Total: {shm_size}")
+                    break
+                
+                shm.buf[current_offset : current_offset + buffer_size] = buffer.to_pybytes()
+
+                socket.send_string(f"{current_offset},{buffer_size}")
+                current_offset += buffer_size
             
-            # Create a RecordBatch
-            batch = pa.RecordBatch.from_pydict(
-                {'array_bytes': [array_val.tobytes()]},
-                schema=self.schema
-            )
+            if current_offset + buffer_size > shm_size:
+                break
 
-            # Serialize the RecordBatch to a buffer using the IPC stream format
-            sink = pa.BufferOutputStream()
-            with pa.ipc.new_stream(sink, self.schema) as writer:
-                writer.write_batch(batch)
-            buffer = sink.getvalue()
-
-            socket.send(buffer)
-
-        socket.send(b"DONE")
-
+        socket.send_string("DONE")
         end_time = time.time()
+
+        shm.close()
         socket.close()
         context.term()
-
         results_queue.put(("producer", end_time - start_time))
 
-    def consumer(self, n_arrays, results_queue, ipc_endpoint):
-        """Consumer process that receives NumPy arrays via PyArrow over ZeroMQ IPC."""
+    def consumer(self, n_arrays, results_queue, shm_name, ipc_endpoint):
+        """Consumer: receives notifications and reads Arrow RecordBatches from shared memory."""
         context = zmq.Context()
         socket = context.socket(zmq.PULL)
         socket.connect(ipc_endpoint)
 
+        shm = shared_memory.SharedMemory(name=shm_name)
         start_time = time.time()
         received_count = 0
-        
-        numpy_dtype = None
-        shape = None
 
         while received_count < n_arrays:
-            buffer = socket.recv()
-            if buffer == b"DONE":
+            message = socket.recv_string()
+            if message == "DONE":
                 break
 
-            with pa.ipc.open_stream(buffer) as reader:
-                batch = reader.read_next_batch()
+            offset, size = map(int, message.split(','))
+            
+            shm_slice = shm.buf[offset : offset + size]
 
-            if received_count == 0:
-                # Extract metadata from the schema on the first message
-                meta = {k.decode(): v.decode() for k, v in batch.schema.metadata.items()}
-                numpy_dtype = np.dtype(meta['dtype'])
-                shape = tuple(map(int, meta['shape'].split(',')))
-
-            # Extract and reconstruct the NumPy array
-            arr_bytes = batch.to_pydict()['array_bytes'][0]
-            array = np.frombuffer(arr_bytes, dtype=numpy_dtype).reshape(shape)
+            with pa.ipc.open_stream(shm_slice) as reader:
+                record_batch = reader.read_next_batch()
+            
+            # Extract the array and convert to NumPy
+            numpy_array = record_batch.column(0)[0].as_py()
             
             received_count += 1
 
         end_time = time.time()
+
+        shm.close()
         socket.close()
         context.term()
-
         results_queue.put(("consumer", end_time - start_time))
 
     def run_benchmark(self, n_arrays):
-        """Run the PyArrow benchmark and return timing results."""
-        results_queue = mp.Queue()
+        """Run the PyArrow zero-copy RecordBatch benchmark."""
+        
+        shm_size = self._estimate_size(n_arrays)
+        shm_name = f"pa_shm_{os.getpid()}_{time.time():.6f}"
+        shm = shared_memory.SharedMemory(create=True, size=shm_size, name=shm_name)
 
         ipc_endpoint = f"ipc://{tempfile.gettempdir()}/pyarrow_benchmark_{os.getpid()}_{time.time():.6f}.ipc"
 
         try:
+            results_queue = mp.Queue()
+
             consumer_process = mp.Process(
                 target=self.consumer,
-                args=(n_arrays, results_queue, ipc_endpoint)
+                args=(n_arrays, results_queue, shm.name, ipc_endpoint)
             )
             consumer_process.start()
 
             producer_process = mp.Process(
                 target=self.producer,
-                args=(n_arrays, results_queue, ipc_endpoint)
+                args=(n_arrays, results_queue, shm.name, shm_size, ipc_endpoint)
             )
             producer_process.start()
 
@@ -131,6 +161,8 @@ class PyArrowBenchmark:
                 "arrays_per_second": n_arrays / total_time if total_time > 0 else 0
             }
         finally:
+            shm.close()
+            shm.unlink()
             ipc_path = ipc_endpoint.replace("ipc://", "")
             try:
                 if os.path.exists(ipc_path):

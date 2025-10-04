@@ -6,9 +6,15 @@ import numpy as np
 import redis
 import os
 
+import msgpack
+import msgpack_numpy as m
+
+m.patch()
+
 class RedisBenchmark:
-    def __init__(self, array_size=1024, host='localhost', port=6379):
+    def __init__(self, array_size=1024, batch_size=1, host='localhost', port=6379):
         self.array_size = array_size
+        self.batch_size = batch_size
         self.redis_host = host
         self.redis_port = port
         self.channel = f"redis_benchmark_{os.getpid()}"
@@ -25,9 +31,11 @@ class RedisBenchmark:
 
         start_time = time.time()
 
-        for i in range(n_arrays):
-            array = np.random.random(self.array_size).astype(np.float32)
-            r.publish(self.channel, array.tobytes())
+        for i in range(0, n_arrays, self.batch_size):
+            batch_size = min(self.batch_size, n_arrays - i)
+            batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+            packed_batch = msgpack.packb(batch, use_bin_type=True)
+            r.publish(self.channel, packed_batch)
 
         # Send termination signal
         r.publish(self.channel, b"DONE")
@@ -56,9 +64,9 @@ class RedisBenchmark:
                 if message['data'] == b"DONE":
                     break
                 
-                # Deserialize array
-                array = np.frombuffer(message['data'], dtype=np.float32)
-                received_count += 1
+                # Deserialize batch
+                unpacked_batch = msgpack.unpackb(message['data'], raw=False)
+                received_count += len(unpacked_batch)
                 if received_count >= n_arrays:
                     break
         
