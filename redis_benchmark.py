@@ -96,20 +96,34 @@ class RedisBenchmark:
         )
         producer_process.start()
 
-        # Wait for both processes to complete
-        producer_process.join()
-        consumer_process.join()
+        # Wait for both processes to complete with timeout
+        producer_process.join(timeout=300)
+        consumer_process.join(timeout=300)
+
+        # Check if processes are still alive
+        if producer_process.is_alive():
+            producer_process.terminate()
+            producer_process.join()
+        if consumer_process.is_alive():
+            consumer_process.terminate()
+            consumer_process.join()
 
         # Collect results
         results = {}
         while not results_queue.empty():
             role, duration = results_queue.get()
             if duration == -1:
+                results_queue.close()
+                results_queue.join_thread()
                 return {
                     "total_time": -1,
                     "error": "Failed to connect to Redis"
                 }
             results[role] = duration
+
+        # Clean up queue
+        results_queue.close()
+        results_queue.join_thread()
 
         total_time = max(results.get("producer", 0), results.get("consumer", 0))
 

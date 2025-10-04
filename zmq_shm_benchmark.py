@@ -18,7 +18,7 @@ class ZeroMQSharedMemoryBenchmark:
         # IPC endpoint will be generated per run
         self.ipc_endpoint = None
 
-    def producer(self, n_arrays, results_queue, shm_name, ipc_endpoint):
+    def producer(self, n_arrays, results_queue, shm_name, ipc_endpoint, ready_event):
         """Producer process that writes arrays to shared memory and sends notifications via ZeroMQ IPC."""
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
@@ -29,8 +29,8 @@ class ZeroMQSharedMemoryBenchmark:
         # Create a NumPy array that directly uses the shared memory buffer
         shm_array = np.ndarray((n_arrays, self.array_size), dtype=np.float32, buffer=shm.buf)
 
-        # Small delay to ensure consumer is ready
-        time.sleep(0.1)
+        # Wait for consumer to be ready
+        ready_event.wait()
 
         start_time = time.time()
 
@@ -55,7 +55,7 @@ class ZeroMQSharedMemoryBenchmark:
         shm.close()
         results_queue.put(("producer", end_time - start_time))
 
-    def consumer(self, n_arrays, results_queue, shm_name, ipc_endpoint):
+    def consumer(self, n_arrays, results_queue, shm_name, ipc_endpoint, ready_event):
         """Consumer process that receives notifications via ZeroMQ IPC and reads arrays from shared memory."""
         context = zmq.Context()
         socket = context.socket(zmq.PULL)
@@ -65,6 +65,9 @@ class ZeroMQSharedMemoryBenchmark:
         shm = shared_memory.SharedMemory(name=shm_name)
         # Create a NumPy array that directly uses the shared memory buffer
         shm_array = np.ndarray((n_arrays, self.array_size), dtype=np.float32, buffer=shm.buf)
+
+        # Signal that consumer is ready
+        ready_event.set()
 
         start_time = time.time()
         received_count = 0
@@ -81,10 +84,10 @@ class ZeroMQSharedMemoryBenchmark:
             # "Read" batch from shared memory.
             # To simulate a real workload, we copy the data. In a true zero-copy
             # pipeline, the consumer might work on the data in-place.
-            for i in range(batch_size):
-                array = shm_array[start_index + i].copy()
-                # In a real application, you would process the array here
-                received_count += 1
+            # Batch copy is more efficient than copying individual arrays
+            batch_copy = shm_array[start_index:start_index + batch_size].copy()
+            # In a real application, you would process the batch here
+            received_count += batch_size
 
         end_time = time.time()
 
@@ -96,7 +99,7 @@ class ZeroMQSharedMemoryBenchmark:
     def run_benchmark(self, n_arrays):
         """Run the ZeroMQ shared memory benchmark and return timing results."""
         total_size = n_arrays * self.array_bytes
-        
+
         # Create a unique name for the shared memory block
         shm_name = f"shm_{os.getpid()}_{time.time():.6f}"
         shm = shared_memory.SharedMemory(create=True, size=total_size, name=shm_name)
@@ -106,30 +109,43 @@ class ZeroMQSharedMemoryBenchmark:
 
         try:
             results_queue = mp.Queue()
+            ready_event = mp.Event()
 
             # Start consumer first
             consumer_process = mp.Process(
                 target=self.consumer,
-                args=(n_arrays, results_queue, shm.name, ipc_endpoint)
+                args=(n_arrays, results_queue, shm.name, ipc_endpoint, ready_event)
             )
             consumer_process.start()
 
             # Start producer
             producer_process = mp.Process(
                 target=self.producer,
-                args=(n_arrays, results_queue, shm.name, ipc_endpoint)
+                args=(n_arrays, results_queue, shm.name, ipc_endpoint, ready_event)
             )
             producer_process.start()
 
-            # Wait for both processes to complete
-            producer_process.join()
-            consumer_process.join()
+            # Wait for both processes to complete with timeout
+            producer_process.join(timeout=300)
+            consumer_process.join(timeout=300)
+
+            # Check if processes are still alive
+            if producer_process.is_alive():
+                producer_process.terminate()
+                producer_process.join()
+            if consumer_process.is_alive():
+                consumer_process.terminate()
+                consumer_process.join()
 
             # Collect results
             results = {}
             while not results_queue.empty():
                 role, duration = results_queue.get()
                 results[role] = duration
+
+            # Clean up queue
+            results_queue.close()
+            results_queue.join_thread()
 
             total_time = max(results.get("producer", 0), results.get("consumer", 0))
 
@@ -144,7 +160,7 @@ class ZeroMQSharedMemoryBenchmark:
             # Clean up shared memory
             shm.close()
             shm.unlink()
-            
+
             # Clean up IPC socket file if it exists
             ipc_path = ipc_endpoint.replace("ipc://", "")
             try:
