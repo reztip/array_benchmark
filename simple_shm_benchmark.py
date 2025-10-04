@@ -28,12 +28,12 @@ class SimpleSharedMemoryBenchmark:
 
                 for i in range(0, n_arrays, self.batch_size):
                     batch_size = min(self.batch_size, n_arrays - i)
-                    batch = [np.random.random(self.array_size).astype(np.float32) for _ in range(batch_size)]
+                    batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
                     
                     # Write batch to shared memory
                     offset = i * self.array_bytes
                     size = batch_size * self.array_bytes
-                    mm[offset:offset + size] = b''.join(arr.tobytes() for arr in batch)
+                    mm[offset:offset + size] = batch.tobytes()
 
                 # Signal completion
                 done_event.set()
@@ -58,11 +58,8 @@ class SimpleSharedMemoryBenchmark:
                     offset = i * self.array_bytes
                     size = batch_size * self.array_bytes
                     batch_bytes = mm[offset:offset + size]
-                    
-                    for j in range(batch_size):
-                        arr_offset = j * self.array_bytes
-                        array = np.frombuffer(batch_bytes[arr_offset:arr_offset + self.array_bytes], dtype=np.float32)
-                        received_count += 1
+                    batch_array = np.frombuffer(batch_bytes, dtype=np.float32).reshape(batch_size, self.array_size)
+                    received_count += batch_array.shape[0]
 
                 # Wait for producer to finish (ensures we measure total pipeline time)
                 done_event.wait()

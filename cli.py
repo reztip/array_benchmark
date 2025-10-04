@@ -32,10 +32,18 @@ def main():
     )
 
     parser.add_argument(
+        "-b", "--batch-size",
+        type=int,
+        default=1,
+        help="Maximum batch size for sending arrays (default: 1)"
+    )
+
+    parser.add_argument(
         "--all",
         action="store_true",
-        help="Run all benchmarks including ZeroMQ + Shared Memory"
+        help="Run all benchmarks (ZeroMQ, Shared Memory, Multiprocessing)"
     )
+
 
     parser.add_argument(
         "--redis",
@@ -47,13 +55,6 @@ def main():
         "--pyarrow",
         action="store_true",
         help="Include PyArrow benchmark in 'all' benchmarks"
-    )
-
-    parser.add_argument(
-        "-b", "--batch-size",
-        type=int,
-        default=1,
-        help="Maximum batch size for sending arrays (default: 1)"
     )
 
     args = parser.parse_args()

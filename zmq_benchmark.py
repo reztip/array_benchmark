@@ -29,8 +29,9 @@ class ZeroMQBenchmark:
 
         for i in range(0, n_arrays, self.batch_size):
             batch_size = min(self.batch_size, n_arrays - i)
-            batch = [np.random.random(self.array_size).astype(np.float32).tobytes() for _ in range(batch_size)]
-            socket.send_multipart(batch)
+            numpy_batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
+            batch_bytes = [arr.tobytes() for arr in numpy_batch]
+            socket.send_multipart(batch_bytes)
 
         # Send termination signal
         socket.send(b"DONE")

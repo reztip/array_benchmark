@@ -16,7 +16,7 @@ class MultiprocessingBenchmark:
 
         for i in range(0, n_arrays, self.batch_size):
             batch_size = min(self.batch_size, n_arrays - i)
-            batch = [np.random.random(self.array_size).astype(np.float32) for _ in range(batch_size)]
+            batch = np.random.random((batch_size, self.array_size)).astype(np.float32)
             queue.put(batch)
 
         # Send termination signal
