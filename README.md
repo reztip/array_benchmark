@@ -25,6 +25,39 @@ Each method is tested with:
 - Warmup runs for stable measurements
 - Detailed throughput metrics (arrays/sec and MB/sec)
 
+## S3 HDF5 Reader
+
+In addition to IPC benchmarking, this project includes a package for reading HDF5 files stored on Amazon S3 with support for partial reads and efficient slicing of large multi-dimensional arrays.
+
+### Key Features
+
+*   **Direct S3 Access:** Read HDF5 files directly from S3 without downloading the entire file
+*   **Partial Reads:** Use HTTP range requests to only download the data you need
+*   **Array Slicing:** Efficiently slice large 4-dimensional arrays (~2GB+)
+*   **Metadata Support:** Read JSON metadata stored within HDF5 files
+*   **Memory Efficient:** Process large datasets in chunks without loading everything into memory
+
+### Quick Example
+
+```python
+from s3_hdf5 import S3HDF5Reader
+import numpy as np
+
+# Read HDF5 file from S3 with partial reads
+with S3HDF5Reader('s3://my-bucket/data/experiment.h5') as reader:
+    # Read metadata
+    metadata = reader.read_metadata()
+
+    # Get array info without downloading
+    info = reader.get_array_info('data')
+    print(f"Array shape: {info['shape']}, Size: {info['nbytes'] / 1e9:.2f} GB")
+
+    # Read only a slice (downloads only requested portion)
+    data_slice = reader.read_array_slice(np.s_[0:10, :, :, 0:5])
+```
+
+For complete documentation, see [S3_HDF5_README.md](S3_HDF5_README.md) and [s3_hdf5_example.py](s3_hdf5_example.py).
+
 ## Installation
 
 1.  Clone this repository:
